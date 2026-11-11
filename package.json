@@ -1,0 +1,28 @@
+{
+	"name": "server",
+	"version": "1.0.0",
+	"type": "module",
+	"description": "",
+	"main": "server.js",
+	"scripts": {
+		"dev": "nodemon server.js",
+		"start": "node server.js",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"keywords": [],
+	"dependencies": {
+		"@imagekit/nodejs": "^7.14.0",
+		"bcryptjs": "^3.0.3",
+		"cors": "^2.8.6",
+		"dotenv": "^18.0.10",
+		"express": "^5.3.0",
+		"file-type": "^22.3.0",
+		"jsonwebtoken": "^9.0.3",
+		"mongoose": "^9.12.1",
+		"multer": "^2.5.0",
+		"zod": "^4.6.7"
+	},
+	"devDependencies": {
+		"nodemon": "^3.1.14"
+	}
+}
