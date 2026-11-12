@@ -16,8 +16,6 @@ import {
 } from "../validators/authValidator.js";
 
 const router = Router();
-
-// Registro
 router.post("/register", validateAuth(registerSchema), register);
 // Inicio de sesión
 router.post("/login", validateAuth(loginSchema), login);

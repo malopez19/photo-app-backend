@@ -1,21 +1,25 @@
 import * as authService from "../services/authService.js";
 
+const isProduction = process.env.NODE_ENV === "production";
+
 const cookieOptions = {
-	httpOnly: true,
-	secure: process.env.NODE_ENV === "production",
-	sameSite: "lax",
-	path: "/",
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    path: "/",
 };
 
 const setAuthCookie = (res, token) => {
-	res.cookie("token", token, cookieOptions);
+	res.cookie("token", token, {
+		...cookieOptions,
+		maxAge: 24 * 60 * 60 * 1000,
+	});
 };
 
 export const register = async (req, res) => {
 	const result = await authService.registerUser(req.body ?? {});
 
 	setAuthCookie(res, result.token);
-
 	return res.status(201).json({
 		user: result.user,
 		message: "Registro exitoso.",

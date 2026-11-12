@@ -24,6 +24,12 @@ export const requireAuth = (req, res, next) => {
 			algorithms: ["HS256"],
 		});
 
+		if (!decoded.id) {
+			return res.status(401).json({
+				message: "Sesión inválida.",
+			});
+		}
+
 		req.user = decoded;
 
 		return next();
