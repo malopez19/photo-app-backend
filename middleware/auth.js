@@ -1,44 +1,35 @@
-
 import jwt from "jsonwebtoken";
 
 export const requireAuth = (req, res, next) => {
-    try {
-        const authHeader = req.headers.authorization;
+	const token = req.cookies?.token;
 
-        if (!authHeader) {
-            return res.status(401).json({
-                message: "Acceso no autorizado. Token requerido.",
-            });
-        }
+	if (!token) {
+		return res.status(401).json({
+			message: "Acceso no autorizado. Sesión no encontrada.",
+		});
+	}
 
-        const match = authHeader.match(/^Bearer\s+(\S+)$/i);
+	const secret = process.env.JWT_SECRET;
 
-        if (!match) {
-            return res.status(401).json({
-                message: "Formato de token inválido.",
-            });
-        }
+	if (!secret) {
+		console.error("JWT_SECRET no está configurado.");
 
-        const secret = process.env.JWT_SECRET;
+		return res.status(500).json({
+			message: "Error de configuración del servidor.",
+		});
+	}
 
-        if (!secret) {
-            console.error("JWT_SECRET no está configurado.");
+	try {
+		const decoded = jwt.verify(token, secret, {
+			algorithms: ["HS256"],
+		});
 
-            return res.status(500).json({
-                message: "Error de configuración del servidor.",
-            });
-        }
+		req.user = decoded;
 
-        const decoded = jwt.verify(match[1], secret, {
-            algorithms: ["HS256"],
-        });
-
-        req.user = decoded;
-
-        next();
-    } catch (error) {
-        return res.status(401).json({
-            message: "Token inválido o expirado.",
-        });
-    }
+		return next();
+	} catch (error) {
+		return res.status(401).json({
+			message: "Sesión inválida o expirada.",
+		});
+	}
 };

@@ -1,6 +1,11 @@
 import { Router } from "express";
 
-import { register, login, getMe } from "../controllers/authController.js";
+import {
+	register,
+	login,
+	getMe,
+	logout,
+} from "../controllers/authController.js";
 
 import { requireAuth } from "../middleware/auth.js";
 
@@ -14,11 +19,11 @@ const router = Router();
 
 // Registro
 router.post("/register", validateAuth(registerSchema), register);
-
 // Inicio de sesión
 router.post("/login", validateAuth(loginSchema), login);
-
 // Obtener usuario autenticado
 router.get("/me", requireAuth, getMe);
+// Cerrar sesión
+router.post("/logout", logout);
 
 export default router;
