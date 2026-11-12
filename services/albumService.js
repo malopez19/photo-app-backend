@@ -4,7 +4,7 @@ import { Media } from "../models/Media.js";
 
 const MAX_PHOTOS_PER_ALBUM = 100;
 
-// Genera errores que el controlador puede interpretar.
+// Generar errores que el controlador pueda interpretar.
 const createError = (message, statusCode) => {
 	const error = new Error(message);
 	error.statusCode = statusCode;
@@ -13,10 +13,17 @@ const createError = (message, statusCode) => {
 
 // Validar identificadores de MongoDB.
 const isValidId = (id) => {
-	return typeof id === "string" && mongoose.isObjectIdOrHexString(id);
+	return mongoose.isObjectIdOrHexString(id);
 };
 
-// Validar y eliminar IDs duplicados.
+// Validar el propietario de los recursos.
+const validateOwnerId = (ownerId) => {
+	if (!isValidId(ownerId)) {
+		throw createError("Usuario no válido.", 401);
+	}
+};
+
+// Validar IDs, normalizarlos y eliminar duplicados.
 const validatePhotoIds = (photoIds) => {
 	if (!Array.isArray(photoIds)) {
 		throw createError("La lista de fotografías no es válida.", 400);
@@ -30,7 +37,7 @@ const validatePhotoIds = (photoIds) => {
 		throw createError("La lista contiene identificadores inválidos.", 400);
 	}
 
-	return [...new Set(photoIds)];
+	return [...new Set(photoIds.map((id) => id.toString().toLowerCase()))];
 };
 
 // Validar el ID de un álbum.
@@ -52,12 +59,13 @@ const verifyPhotoOwnership = async (photoIds, ownerId) => {
 		isTrash: false,
 	})
 		.select("_id")
-		.lean();
+		.lean()
+		.exec();
 
 	return photos.length === photoIds.length;
 };
 
-// Comprobar la propiedad de las fotografías.
+// Exigir que todas las fotografías sean del usuario.
 const assertPhotoOwnership = async (photoIds, ownerId) => {
 	const valid = await verifyPhotoOwnership(photoIds, ownerId);
 
@@ -85,6 +93,8 @@ export const createAlbum = async ({
 	photoIds = [],
 	ownerId,
 }) => {
+	validateOwnerId(ownerId);
+
 	if (typeof title !== "string") {
 		throw createError("El título del álbum es requerido.", 400);
 	}
@@ -122,21 +132,26 @@ export const createAlbum = async ({
 			owner: ownerId,
 		}),
 		ownerId,
-	);
+	).exec();
 };
 
 // OBTENER MIS ÁLBUMES
 export const getMyAlbums = async (ownerId) => {
+	validateOwnerId(ownerId);
+
 	return populateAlbum(
-		Album.find({ owner: ownerId }).sort({
+		Album.find({
+			owner: ownerId,
+		}).sort({
 			updatedAt: -1,
 		}),
 		ownerId,
-	);
+	).exec();
 };
 
 // OBTENER UN ÁLBUM
 export const getAlbumById = async (id, ownerId) => {
+	validateOwnerId(ownerId);
 	validateAlbumId(id);
 
 	const album = await populateAlbum(
@@ -145,7 +160,7 @@ export const getAlbumById = async (id, ownerId) => {
 			owner: ownerId,
 		}),
 		ownerId,
-	);
+	).exec();
 
 	if (!album) {
 		throw createError("Álbum no encontrado.", 404);
@@ -156,6 +171,7 @@ export const getAlbumById = async (id, ownerId) => {
 
 // AÑADIR FOTOGRAFÍAS
 export const addPhotosToAlbum = async (id, photoIds, ownerId) => {
+	validateOwnerId(ownerId);
 	validateAlbumId(id);
 
 	const validatedPhotoIds = validatePhotoIds(photoIds);
@@ -164,61 +180,105 @@ export const addPhotosToAlbum = async (id, photoIds, ownerId) => {
 		throw createError("Se requiere una lista de fotografías.", 400);
 	}
 
+	// Buscar exclusivamente un álbum del usuario autenticado.
 	const album = await Album.findOne({
 		_id: id,
 		owner: ownerId,
-	}).select("photos");
+	})
+		.select("photos")
+		.exec();
 
 	if (!album) {
 		throw createError("Álbum no encontrado.", 404);
 	}
 
+	// Comprobar que todas las fotografías sean del usuario.
 	await assertPhotoOwnership(validatedPhotoIds, ownerId);
 
-	const currentPhotoIds = album.photos.map((photoId) => photoId.toString());
+	const currentPhotoIds = album.photos.map((photoId) =>
+		photoId.toString().toLowerCase(),
+	);
 
+	// Evitar añadir fotografías que ya estén en el álbum.
 	const newPhotoIds = validatedPhotoIds.filter(
 		(photoId) => !currentPhotoIds.includes(photoId),
 	);
 
-	if (currentPhotoIds.length + newPhotoIds.length > MAX_PHOTOS_PER_ALBUM) {
-		throw createError(
-			`Un álbum no puede superar las ${MAX_PHOTOS_PER_ALBUM} fotografías.`,
-			400,
-		);
+	if (newPhotoIds.length === 0) {
+		return populateAlbum(
+			Album.findOne({
+				_id: id,
+				owner: ownerId,
+			}),
+			ownerId,
+		).exec();
 	}
 
+	// Actualización atómica: vuelve a comprobar el límite
+	// usando el tamaño actual del array en MongoDB.
 	const updatedAlbum = await Album.findOneAndUpdate(
 		{
 			_id: id,
 			owner: ownerId,
+
+			$expr: {
+				$lte: [
+					{
+						$add: [
+							{
+								$size: {
+									$ifNull: ["$photos", []],
+								},
+							},
+							newPhotoIds.length,
+						],
+					},
+					MAX_PHOTOS_PER_ALBUM,
+				],
+			},
 		},
 		{
 			$addToSet: {
-				photos: { $each: validatedPhotoIds },
+				photos: {
+					$each: newPhotoIds,
+				},
 			},
 		},
 		{
 			new: true,
 			runValidators: true,
 		},
-	);
+	).exec();
 
 	if (!updatedAlbum) {
-		throw createError("Álbum no encontrado.", 404);
+		// Diferenciar un álbum inexistente de un límite alcanzado.
+		const albumExists = await Album.exists({
+			_id: id,
+			owner: ownerId,
+		});
+
+		if (!albumExists) {
+			throw createError("Álbum no encontrado.", 404);
+		}
+
+		throw createError(
+			`Un álbum no puede superar las ${MAX_PHOTOS_PER_ALBUM} fotografías.`,
+			400,
+		);
 	}
 
 	return populateAlbum(
 		Album.findOne({
-			_id: updatedAlbum._id,
+			_id: id,
 			owner: ownerId,
 		}),
 		ownerId,
-	);
+	).exec();
 };
 
 // QUITAR FOTOGRAFÍA
 export const removePhotoFromAlbum = async (id, photoId, ownerId) => {
+	validateOwnerId(ownerId);
 	validateAlbumId(id);
 
 	if (!isValidId(photoId)) {
@@ -232,14 +292,14 @@ export const removePhotoFromAlbum = async (id, photoId, ownerId) => {
 		},
 		{
 			$pull: {
-				photos: photoId,
+				photos: new mongoose.Types.ObjectId(photoId),
 			},
 		},
 		{
 			new: true,
 			runValidators: true,
 		},
-	);
+	).exec();
 
 	if (!album) {
 		throw createError("Álbum no encontrado.", 404);
@@ -251,17 +311,18 @@ export const removePhotoFromAlbum = async (id, photoId, ownerId) => {
 			owner: ownerId,
 		}),
 		ownerId,
-	);
+	).exec();
 };
 
 // ELIMINAR ÁLBUM
 export const deleteAlbum = async (id, ownerId) => {
+	validateOwnerId(ownerId);
 	validateAlbumId(id);
 
 	const album = await Album.findOneAndDelete({
 		_id: id,
 		owner: ownerId,
-	});
+	}).exec();
 
 	if (!album) {
 		throw createError("Álbum no encontrado.", 404);

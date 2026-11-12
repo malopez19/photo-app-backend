@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 export const requireAuth = (req, res, next) => {
 	const token = req.cookies?.token;
@@ -24,16 +25,24 @@ export const requireAuth = (req, res, next) => {
 			algorithms: ["HS256"],
 		});
 
-		if (!decoded.id) {
+		if (
+			!decoded ||
+			typeof decoded !== "object" ||
+			typeof decoded.id !== "string" ||
+			!mongoose.isObjectIdOrHexString(decoded.id)
+		) {
 			return res.status(401).json({
 				message: "Sesión inválida.",
 			});
 		}
 
-		req.user = decoded;
+		req.user = {
+			...decoded,
+			id: decoded.id,
+		};
 
 		return next();
-	} catch (error) {
+	} catch {
 		return res.status(401).json({
 			message: "Sesión inválida o expirada.",
 		});
