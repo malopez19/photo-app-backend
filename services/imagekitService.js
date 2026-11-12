@@ -72,6 +72,15 @@ export const uploadFile = async ({ buffer, extension, mediaType }) => {
 			file,
 			fileName,
 			useUniqueFileName: false,
+			...(mediaType === "image" && {
+				extensions: [
+					{
+						name: "google-auto-tagging",
+						maxTags: 4,
+						minConfidence: 80,
+					},
+				],
+			}),
 		});
 
 		if (!response.fileId || !response.url) {
